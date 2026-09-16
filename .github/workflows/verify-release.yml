@@ -1,0 +1,96 @@
+# 萤火虫之国安卓 App —— 只分发安装包，不含源码
+#
+# 用途：每次发 Release 后自动核验 —— APK 真能下载、是合法安装包、
+# 页面（index.html）上的版本号与体积跟实际对得上。坏掉就让任务标红。
+# GitHub 会发邮件提醒，不必天天自己盯。
+
+name: APK 发布校验
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 取最新 Release 的 APK 资产
+        id: apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 直接向 API 要下载地址与体积，比拼接 URL 稳
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > /tmp/rel.json
+          read -r NAME SIZE <<<"$(jq -r '
+            [.assets[] | select(.name | endswith(".apk"))] | first
+            | "\(.name) \(.size)"' /tmp/rel.json)"
+          if [ -z "${NAME:-}" ]; then
+            echo "::error::最新 Release 里没有 .apk 资产。请在 Release 页面上传 app-release.apk。"
+            exit 1
+          fi
+          URL=$(jq -r '
+            [.assets[] | select(.name | endswith(".apk"))] | first
+            | .browser_download_url' /tmp/rel.json)
+          echo "name=$NAME"   >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE"   >> "$GITHUB_OUTPUT"
+          echo "url=$URL"     >> "$GITHUB_OUTPUT"
+          echo "APK：$NAME / $SIZE 字节 / $URL"
+
+      - name: 校验 APK 真能下载且是合法安装包
+        env:
+          APK_URL: ${{ steps.apk.outputs.url }}
+          DECLARED: ${{ steps.apk.outputs.size }}
+        run: |
+          set -euo pipefail
+          CODE=$(curl -sSL -o /tmp/app-release.apk -w '%{http_code}' "$APK_URL")
+          echo "HTTP $CODE"
+          [ "$CODE" = "200" ] || { echo "::error::APK 下载返回 $CODE"; exit 1; }
+
+          REAL=$(stat -c%s /tmp/app-release.apk)
+          echo "实际下载：$REAL 字节（Release 记录 $DECLARED）"
+          [ "$REAL" = "$DECLARED" ] || { echo "::error::下载体积与 Release 记录不一致"; exit 1; }
+
+          # APK 是 zip，必须以 PK\x03\x04 开头；否则多半下到了 HTML 错误页
+          MAGIC=$(head -c2 /tmp/app-release.apk | od -An -tx1 | tr -d ' \n')
+          if [ "$MAGIC" != "504b" ]; then
+            echo "::error::下载回来的不是合法 APK（zip 魔数 504b，实得 $MAGIC）"
+            exit 1
+          fi
+          echo "✅ APK 可下载、字节数吻合、文件头是合法 zip"
+
+      - name: 对比页面标注的版本号与体积
+        env:
+          APK_URL: ${{ steps.apk.outputs.url }}
+          DECLARED: ${{ steps.apk.outputs.size }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          FAIL=0
+
+          MB=$(awk "BEGIN{printf \"%.1f\", $DECLARED/1024/1024}")
+          echo "APK 体积换算：${MB} MB"
+          if grep -q "${MB} MB" index.html; then
+            echo "✅ 页面标注体积与 APK 一致（${MB} MB）"
+          else
+            echo "::warning::index.html 里没有「${MB} MB」—— 发版后记得同步页面上的体积。"
+            FAIL=1
+          fi
+
+          if [ -n "${TAG:-}" ]; then
+            VER=${TAG#v}
+            echo "Release 标签：$TAG（版本 $VER）"
+            if grep -q "v${VER}" index.html; then
+              echo "✅ 页面已标注 v${VER}"
+            else
+              echo "::warning::index.html 里没有出现 v${VER} —— 记得同步版本号、体积与更新日志。"
+              FAIL=1
+            fi
+          fi
+
+          [ "$FAIL" = "0" ] || echo "（以上为提醒，不阻断发布；但页面与包不一致会让用户困惑。）"
