@@ -86,14 +86,56 @@ git -c http.proxy=http://127.0.0.1:10808 -c https.proxy=http://127.0.0.1:10808 p
 
 ---
 
+## ✅ 当时实际完成情况（2026-09-16）
+
+五个步骤全部做完，逐项留痕：
+
+| 步骤 | 结果 |
+| --- | --- |
+| ① 建仓库 | <https://github.com/Miruko2/hanakos-android>（Public）|
+| ② 推文件 | 4 个文件已进 `main`（README.md / SETUP.md / index.html / .github/workflows/verify-release.yml）|
+| ③ 传 APK | Release [v0.72](https://github.com/Miruko2/hanakos-android/releases/tag/v0.72)，资产 `app-release.apk`（4,215,751 字节）|
+| ④ 开 Pages | 已开启，站点 <https://miruko2.github.io/hanakos-android/>（HTTP 200）|
+| ⑤ 提交收录 | **待你做**：GSC + 百度各提交一次那个 Pages 地址 |
+
+**几个实测结论**（供以后参考）：
+
+- **本机 `git push` 现在能用，但当初建仓库时用过网页上传**：首轮建仓库时
+  `git push` 报 `could not read Username for 'https://github.com': terminal prompts
+  disabled`（当时的状态），于是**改用浏览器桥接在网页上完成文件上传**
+  （`github.com/<user>/<repo>/upload`，或新建文件页 `.cm-editor` 灌内容）。
+  后来重试 `git push` 是通的（凭据已就绪），所以**优先用命令行推**；
+  网页那条路只在没有凭据时兜底。
+  ⚠️ 网页的 CodeMirror 编辑器灌长文本要**一次性粘贴**，分段注入会静默叠加出重复内容。
+- **⚠️ 网页操作与命令行操作会产生两条没有共同祖先的历史线。** 这个仓库现在就
+  有这种痕迹：本地 `git init` 是一条（根提交 `50c15bf`），网页上传是另一条
+  （根提交 `1ee5fac`）。两份**文件内容完全相同**，但 commit 历史对不上，
+  `git merge-base` 返回空。处理办法是 `git reset --soft origin/main` 把本地
+  对齐到远端历史，再把自己的改动作为一次新提交推上去（别硬合并）。
+- Pages 构建与 Release 核验工作流都是**自动触发**的：发 Release 后
+  `APK 发布校验` 立即跑（本次 6 秒，全绿），Pages 那边 `pages-build-deployment` 自动构建。
+- 核验日志实际输出：
+  ```
+  HTTP 200
+  实际下载：4215751 字节（Release 记录 4215751）
+  ✅ APK 可下载、字节数吻合、文件头是合法 zip
+  ```
+- **APK 的 `META-INF/` 里没有 v1 签名文件**（`.RSA`/`.SF`/`.MF`）——
+  这是 release 构建用了 v2/v3 签名方案，属正常，不影响安装。
+
+---
+
 ## 以后发新版怎么做
 
 1. 按 `android-glass-demo/deploy/APP_UPDATE_GUIDE.md` 正常发版（改 versionCode、出包、传 R2）
-2. 在这个仓库建一个新的 Release（tag `v0.73`），把新 APK 传上去
+2. 在这个仓库建一个新的 Release（tag 如 `v0.73`，把新 APK 拖进 Attach binaries）
 3. 改 `index.html` 和 `README.md` 里的三处数字：版本号、体积、更新日志
-4. push
+4. 提交
 
-第 3 步的核验工作流会提醒你有没有漏改。
+第 3 步漏改的话，核验工作流会在 Actions 里给出 `::warning` 提醒（不阻断发布）。
+
+> 提高效率的小抄：新建 Release 时可以直接带参数打开，省掉手点 tag 下拉：
+> `https://github.com/Miruko2/hanakos-android/releases/new?tag=v0.73&target=main&title=v0.73`
 
 ---
 
@@ -111,6 +153,8 @@ GitHub 页面本身权重高、能被 Google 索引，仓库页 + Pages 落地�
 - 页脚明确写了「与日本鸟取县景点、台湾萤火虫景点无关」——
   这句很重要：搜「萤火虫之国」的裸词被那些观光景点占满，
   明确撇清关系有助于 Google 把"社区/App"这个意图和你的站绑在一起
+- 正文里反复出现「萤火虫之国 + 音乐 / 歌单 / 共同收听」——
+  这是业主定的主攻方向（`萤火虫之国 音乐` 已能搜到，值得继续加强）
 
 **和主站 `/download` 页的关系**：
 两个页面都指向同一个 APK，不冲突。主站下载页走的是 `forum.hanakos.cc/download`，
